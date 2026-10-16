@@ -5,6 +5,8 @@ import { evaluate } from './pose-rules.mjs';
 import { getReference, landmarkIds } from './reference.mjs';
 import { comparePose, projectReference, normalizedLive } from './comparison.mjs';
 const $ = id => document.getElementById(id);
+const embeddedPreview = new URLSearchParams(location.search).get('embed') === '1';
+let coverReady = false;
 import { poses } from './exercises.mjs';
 const presence = new PosePresence();
 const focusView = createFocusView($('stage'),()=>{presence.dismiss();focusView.setExpanded(false);});
@@ -102,13 +104,27 @@ async function initThree() {
             const minX=Math.min(...projected)-.18,maxX=Math.max(...projected)+.18;
             const full=$('stage').classList.contains('focus-active');
             const area=host.getBoundingClientRect();
-            const usableHeight=Math.max(.3,1-(full?230:190)/Math.max(area.height,1));
+            const usableHeight=embeddedPreview ? .85 : Math.max(.3,1-(full?230:190)/Math.max(area.height,1));
             const usableWidth=full?.88:.85;
             const distance=Math.max((maxY-minY)/(2*Math.tan(34*Math.PI/360)*usableHeight),(maxX-minX)/(2*Math.tan(34*Math.PI/360)*camera.aspect*usableWidth))+.12;
             const centerY=(minY+maxY)/2;
             camera.position.lerp(new THREE.Vector3((minX+maxX)/2,centerY,distance),.12);camera.lookAt(camera.position.x,centerY,0);
-            renderer.render(scene, camera) });
+            renderer.render(scene, camera);
+            if (embeddedPreview && !coverReady && host.clientWidth && host.clientHeight) {
+                coverReady = true;
+                parent.postMessage({ type: 'portfolio-preview', event: 'ready' }, location.origin);
+            }
+        });
     } catch (e) { $('stage-note').innerHTML = '3D guide could not load.<small>You can still follow the written cues or enable your camera.</small>'; $('rotate').disabled = true; }
 }
 initThree();
-const lifecycle = new AbortController(); if (document.modelContext?.registerTool) { try { Promise.resolve(document.modelContext.registerTool({ name: 'select_stretch', description: 'Select a stretch or yoga reference without activating the camera.', inputSchema: { type: 'object', properties: { id: { type: 'string', enum: poses.map(p => p.id) } }, required: ['id'], additionalProperties: false }, annotations: { readOnlyHint: false }, execute(input) { if (!input || typeof input.id !== 'string' || !poses.some(p => p.id === input.id)) throw Error('Unknown movement'); selectPose(input.id); return { selected: current, cameraActive: !!stream } } }, { signal: lifecycle.signal })).catch(() => { }); } catch { } } window.addEventListener('pagehide', () => lifecycle.abort());
+if (embeddedPreview) {
+    const sequence = ['reach', 'warrior', 'tree', 'side'];
+    let step = 0;
+    setInterval(() => {
+        if (document.hidden) return;
+        step = (step + 1) % sequence.length;
+        selectPose(sequence[step]);
+    }, 3200);
+}
+const lifecycle = new AbortController(); if (!embeddedPreview && document.modelContext?.registerTool) { try { Promise.resolve(document.modelContext.registerTool({ name: 'select_stretch', description: 'Select a stretch or yoga reference without activating the camera.', inputSchema: { type: 'object', properties: { id: { type: 'string', enum: poses.map(p => p.id) } }, required: ['id'], additionalProperties: false }, annotations: { readOnlyHint: false }, execute(input) { if (!input || typeof input.id !== 'string' || !poses.some(p => p.id === input.id)) throw Error('Unknown movement'); selectPose(input.id); return { selected: current, cameraActive: !!stream } } }, { signal: lifecycle.signal })).catch(() => { }); } catch { } } window.addEventListener('pagehide', () => lifecycle.abort());
