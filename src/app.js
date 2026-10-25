@@ -1,31 +1,85 @@
+import {initLanguage, poseSearchText} from './i18n.mjs';
+import {HoldConfirmation, qualifiesForHold} from './hold-confirmation.mjs';
+import {createCameraGuidance} from './camera-guidance.mjs?v=12';
 import {prepareLandmarks,isSidePose} from './tracking-view.mjs';
 import { PosePresence } from './pose-presence.mjs';
 import { createFocusView } from './focus-view.mjs';
 import { evaluate } from './pose-rules.mjs';
-import { getReference, landmarkIds } from './reference.mjs';
+import { getReference, landmarkIds, links } from './reference.mjs';
 import { comparePose, projectReference, normalizedLive } from './comparison.mjs';
 const $ = id => document.getElementById(id);
 const embeddedPreview = new URLSearchParams(location.search).get('embed') === '1';
 let coverReady = false;
 import { poses } from './exercises.mjs';
+const guidance = createCameraGuidance($('stage'));
 const presence = new PosePresence();
+const holdConfirmation = new HoldConfirmation();
+let holdState = {phase:"adjusting",seconds:3};
 const focusView = createFocusView($('stage'),()=>{presence.dismiss();focusView.setExpanded(false);});
 let lastPoseFrame=0;
 let flipped = false;
 let current = 'reach', filter = 'all', stream = null, landmarker = null, starting = false, runId = 0, lastVideo = -1, lastDetect = 0, lastFeedback = 0, remaining = 30, timerId = null, sceneApi = null;
-function drawCards() { $('poses').innerHTML = poses.filter(p => filter === 'all' || p.type === filter).map(p => `<button class="pose-card ${p.id === current ? 'active' : ''}" data-pose="${p.id}" aria-pressed="${p.id === current}"><span class="pose-icon" aria-hidden="true">${p.icon}</span><span><strong>${p.name}</strong><small>${p.type === 'yoga' ? 'Yoga' : 'Stretch'} · ${p.hold || 30} sec</small></span><span class="arrow">↗</span></button>`).join(''); document.querySelectorAll('[data-pose]').forEach(b => b.onclick = () => selectPose(b.dataset.pose)); }
-function selectPose(id) { const p = poses.find(p => p.id === id); if (!p) throw Error('Unknown movement'); current = id; flipped=false; stopTimer(); remaining = p.hold || 30; updateTimer(); $('hold-duration').textContent=(p.hold || 30)+' sec'; $('pose-tag').textContent = `${p.type.toUpperCase()} · ${p.area}`; $('pose-name').textContent = p.name; $('pose-description').textContent = p.description; $('pose-level').textContent=p.level || 'Easy'; $('angle-label').textContent=isSidePose(id)?'↔ Side-on camera · full body in frame':'↔ Face your camera'; $('camera-setup').textContent=isSidePose(id)?'Camera setup: side-on, low enough to see the whole mat. Only the visible side is compared.':'Camera setup: face the camera with your whole body visible.'; $('cues').innerHTML = p.cues.map((c, i) => `<div class="cue"><span>${i + 1}</span>${c}</div>`).join(''); drawCards(); sceneApi?.setPose(id); $('switch-side').hidden = !(p.asymmetric || ['side','warrior'].includes(id)); clearComparison(); setFeedback({ state: 'unknown', title: stream ? 'Find your starting position' : 'Ready when you are', text: stream ? (isSidePose(id)?'Turn side-on to your camera with your whole body visible.':'Face the camera and keep your whole body visible.') : 'Turn on your camera to see your alignment feedback here.' }); }
+function poseIllustration(id) {
+    const points = getReference(id).map(([x, y]) => [50 + x * 27, 85 - y * 27]);
+    const shoulder = [(points[0][0] + points[1][0]) / 2, (points[0][1] + points[1][1]) / 2];
+    const hip = [(points[6][0] + points[7][0]) / 2, (points[6][1] + points[7][1]) / 2];
+    const length = Math.hypot(shoulder[0] - hip[0], shoulder[1] - hip[1]);
+    const head = shoulder.map((value, i) => value + (value - hip[i]) / length * 9);
+    return `<svg viewBox="0 0 100 100" fill="none" aria-hidden="true"><path d="M20 91h60" class="pose-ground"/>${links.map(([a, b]) => `<path d="M${points[a].join(' ')}L${points[b].join(' ')}"/>`).join('')}<circle cx="${head[0]}" cy="${head[1]}" r="4.5"/></svg>`;
+}
+function drawCards() {
+    const query = $('pose-search').value.trim().toLowerCase();
+    const matching = poses.filter(p => (filter === 'all' || p.type === filter) && poseSearchText(p).includes(query));
+    $('poses').innerHTML = matching.map(p => `<button class="pose-card ${p.id === current ? 'active' : ''}" data-pose="${p.id}" aria-pressed="${p.id === current}"><span class="pose-icon">${poseIllustration(p.id)}</span><span class="pose-card-copy"><strong>${p.name}</strong><small>${p.type === 'yoga' ? 'Yoga' : 'Stretch'} <span aria-hidden="true">·</span> ${p.hold || 30} sec</small></span><span class="pose-check" aria-hidden="true">${p.id === current ? '✓' : '↗'}</span></button>`).join('');
+    $('pose-count').textContent = `${matching.length} movement${matching.length === 1 ? '' : 's'}${query ? ' found' : ' to explore'}`;
+    $('pose-empty').hidden = matching.length > 0;
+    $('poses').querySelectorAll('[data-pose]').forEach(button => button.onclick = () => {
+        selectPose(button.dataset.pose);
+        $('pose-dialog').close();
+    });
+}
+function selectPose(id) { const p = poses.find(p => p.id === id); if (!p) throw Error('Unknown movement'); current = id; flipped=false; guidance.reset(); if(stream && !starting) guidance.show('searching',current); presence.reset(); focusView.setExpanded(false); stopTimer(); remaining = p.hold || 30; updateTimer(); $('hold-duration').textContent=(p.hold || 30)+' sec'; $('pose-tag').textContent = `${p.type.toUpperCase()} · ${p.area}`; $('pose-name').textContent = p.name; $('pose-description').textContent = p.description; $('pose-level').textContent=p.level || 'Easy'; $('angle-label').textContent=isSidePose(id)?'↔ Side-on camera · full body in frame':'↔ Face your camera'; $('camera-setup').textContent=isSidePose(id)?'Camera setup: side-on, low enough to see the whole mat. Only the visible side is compared.':'Camera setup: face the camera with your whole body visible.'; $('cues').innerHTML = p.cues.map((c, i) => `<div class="cue"><span>${i + 1}</span>${c}</div>`).join(''); drawCards(); sceneApi?.setPose(id); $('switch-side').hidden = !(p.asymmetric || ['side','warrior'].includes(id)); clearComparison(); setFeedback({ state: 'unknown', title: stream ? 'Find your starting position' : 'Ready when you are', text: stream ? (isSidePose(id)?'Turn side-on to your camera with your whole body visible.':'Face the camera and keep your whole body visible.') : 'Turn on your camera to see your alignment feedback here.' }); }
 function setFeedback(r) { $('focus-feedback').textContent=r.title+' — '+r.text; document.querySelector('.feedback').className = `feedback ${r.state}`; $('feedback-title').textContent = r.title; $('feedback-text').textContent = r.text; $('feedback-icon').textContent = r.state === 'good' ? '✓' : r.state === 'warning' ? '↗' : '◌'; }
-document.querySelectorAll('[data-filter]').forEach(b => b.onclick = () => { filter = b.dataset.filter; document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('selected', x === b)); drawCards() });
+function setFilter(value) {
+    filter = value;
+    document.querySelectorAll('[data-filter]').forEach(button => {
+        const selected = button.dataset.filter === filter;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-pressed', String(selected));
+    });
+    drawCards();
+}
+document.querySelectorAll('[data-filter]').forEach(button => button.onclick = () => setFilter(button.dataset.filter));
+$('pose-search').addEventListener('input', drawCards);
+$('reset-poses').onclick = () => { $('pose-search').value = ''; setFilter('all'); $('pose-search').focus(); };
+$('select-pose').onclick = () => {
+    $('pose-search').value = '';
+    setFilter('all');
+    $('pose-dialog').showModal();
+    $('poses').scrollTop = 0;
+};
+$('close-poses').onclick = () => $('pose-dialog').close();
+$('pose-dialog').addEventListener('click', event => {
+    const bounds = $('pose-dialog').getBoundingClientRect();
+    if (event.target === $('pose-dialog') && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) $('pose-dialog').close();
+});
+$('pose-dialog').addEventListener('close', () => $('select-pose').focus({ preventScroll: true }));
+$('toggle-details').onclick = () => {
+    const show = $('pose-details').hidden;
+    $('pose-details').hidden = !show;
+    document.querySelector('.workspace').classList.toggle('show-details', show);
+    $('toggle-details').setAttribute('aria-expanded', String(show));
+    $('toggle-details').querySelector('span').textContent = show ? '−' : '+';
+};
 function updateTimer() { $('time').textContent = `00:${String(remaining).padStart(2, '0')}`; }
 function stopTimer() { clearInterval(timerId); timerId = null; $('timer').textContent = '▶'; $('timer').setAttribute('aria-label', 'Start hold timer'); }
 $('timer').onclick = () => { if (timerId) { stopTimer(); return } if (!remaining) remaining = poses.find(p=>p.id===current)?.hold || 30; $('timer').textContent = 'Ⅱ'; $('timer').setAttribute('aria-label', 'Pause hold timer'); timerId = setInterval(() => { remaining--; updateTimer(); if (!remaining) { stopTimer(); setFeedback({ state: 'unknown', title: 'Take a breath', text: 'Release gently. Rest or switch sides when you’re ready.' }) } }, 1000); };
-function stopCamera() { presence.reset();focusView.setExpanded(false);runId++; stream?.getTracks().forEach(t => t.stop()); stream = null; $('video').srcObject = null; $('video').hidden = $('overlay').hidden = true; $('three').hidden = false; $('stage-note').hidden = false; $('rotate').hidden = false; $('stage').classList.remove('live'); $('show-camera').disabled=true; $('camera-dialog').close(); clearComparison(); $('mode').textContent = '○   REFERENCE PREVIEW'; $('camera').textContent = '▣   Enable camera'; $('camera-title').textContent = 'Your space. Your pace.'; $('camera-sub').textContent = 'Enable your camera to get live alignment cues.'; stopTimer(); setFeedback({ state: 'unknown', title: 'Camera is off', text: 'Your reference guide is ready. You can restart whenever you like.' }); }
+function stopCamera() { guidance.hide(); presence.reset();focusView.setExpanded(false);runId++; stream?.getTracks().forEach(t => t.stop()); stream = null; $('video').srcObject = null; $('video').hidden = $('overlay').hidden = true; $('three').hidden = false; $('stage-note').hidden = false; $('rotate').hidden = false; $('stage').classList.remove('live'); $('expand-practice').disabled=true; $('show-camera').disabled=true; $('camera-dialog').close(); $('tracking-details').hidden=true; $('tracking-details').open=false; clearComparison(); $('mode').textContent = '○   REFERENCE PREVIEW'; $('camera').textContent = 'Enable camera'; $('camera-title').textContent = 'Live alignment'; $('camera-sub').textContent = 'Enable your camera to get live alignment cues.'; stopTimer(); setFeedback({ state: 'unknown', title: 'Camera is off', text: 'Your reference guide is ready. You can restart whenever you like.' }); }
 $('camera').onclick = async () => {
-    if (stream) { stopCamera(); return } if (starting) return; starting = true; $('camera').disabled = true; $('camera').textContent = 'Connecting…'; try {
-        if (!navigator.mediaDevices?.getUserMedia) throw Error('Camera access requires HTTPS or localhost in a supported browser.'); stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false }); $('camera-sub').textContent = 'Preparing on-device pose tracking…'; if (!landmarker) { const { FilesetResolver, PoseLandmarker } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs'); const files = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm'); landmarker = await PoseLandmarker.createFromOptions(files, { baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task' }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: .6, minPosePresenceConfidence: .6, minTrackingConfidence: .6 }); }
-        $('video').srcObject = stream; await $('video').play(); $('video').hidden = $('overlay').hidden = false; $('three').hidden = false; $('stage-note').hidden = true; $('rotate').hidden = false; $('stage').classList.add('live'); $('show-camera').disabled=false; $('mode').textContent = '●   LIVE · ON DEVICE'; $('camera').textContent = 'Stop camera'; $('camera-title').textContent = 'Make yourself comfortable.'; $('camera-sub').textContent = isSidePose(current)?'Full body in frame · Camera side-on':'Full body in frame · Face the camera'; lastVideo = -1; const token = ++runId; stream.getVideoTracks()[0].onended = () => { if (stream) stopCamera() }; requestAnimationFrame(t => track(t, token));
-    } catch (e) { stopCamera(); const msg = e.name === 'NotAllowedError' ? 'Camera permission was declined. Allow access in your browser and try again.' : e.name === 'NotFoundError' ? 'No camera was found. Connect a camera and try again.' : e.message || 'Could not start tracking. Check your connection and try again.'; $('camera-sub').textContent = msg; setFeedback({ state: 'warning', title: 'Camera could not start', text: msg }); } finally { starting = false; $('camera').disabled = false; }
+    if (stream) { stopCamera(); return } if (starting) return; starting = true; $('camera').disabled = true; $('camera').textContent = 'Connecting…'; guidance.reset(); guidance.show('permission',current); let loadingNotice; try {
+        if (!navigator.mediaDevices?.getUserMedia) throw Error('Camera access requires HTTPS or localhost in a supported browser.'); stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false }); guidance.show('loading',current); loadingNotice=setTimeout(()=>guidance.show('slow',current),12000); $('camera-sub').textContent = 'Preparing on-device pose tracking…'; if (!landmarker) { const { FilesetResolver, PoseLandmarker } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs'); const files = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm'); landmarker = await PoseLandmarker.createFromOptions(files, { baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task' }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: .6, minPosePresenceConfidence: .6, minTrackingConfidence: .6 }); }
+        $('video').srcObject = stream; await $('video').play(); $('video').hidden = $('overlay').hidden = false; $('three').hidden = false; $('stage-note').hidden = true; $('rotate').hidden = false; $('stage').classList.add('live'); $('expand-practice').disabled=false; $('show-camera').disabled=false; $('tracking-details').hidden=false; $('mode').textContent = '●   LIVE · ON DEVICE'; $('camera').textContent = 'Stop camera'; $('camera-title').textContent = 'Camera active'; $('camera-sub').textContent = isSidePose(current)?'Full body in frame · Camera side-on':'Full body in frame · Face the camera'; clearTimeout(loadingNotice); guidance.show('searching',current); lastPoseFrame=performance.now(); lastVideo = -1; const token = ++runId; stream.getVideoTracks()[0].onended = () => { if (stream) stopCamera() }; requestAnimationFrame(t => track(t, token));
+    } catch (e) { stopCamera(); const msg = e.name === 'NotAllowedError' ? 'Camera permission was declined. Allow access in your browser and try again.' : e.name === 'NotFoundError' ? 'No camera was found. Connect a camera and try again.' : e.message || 'Could not start tracking. Check your connection and try again.'; guidance.show('error',current,msg); $('camera-sub').textContent = msg; setFeedback({ state: 'warning', title: 'Camera could not start', text: msg }); } finally { clearTimeout(loadingNotice); starting = false; $('camera').disabled = false; }
 };
 const connections = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
 function track(t, token) {
@@ -35,24 +89,35 @@ function track(t, token) {
             const assessment = evaluate(current, p, v.videoWidth, v.videoHeight);
             lastPoseFrame=t;
             const comparison = assessment.state === 'unknown' ? null : comparePose(current, p, c.width, c.height, flipped);
-            focusView.setExpanded(presence.update(!!comparison && !!sceneApi,t));
+            holdState=holdConfirmation.update(qualifiesForHold(assessment,comparison),!!comparison,t);
+            renderHold();
+            guidance.update(current,p,c.width,c.height,!!comparison,t,holdState,assessment.state==='warning'?assessment:comparison?.feedback);
+            // Keep the layout stable when a person enters; enlargement is explicitly requested.
             drawComparison(ctx, p, comparison, c.width, c.height);
             sceneApi?.setLive(comparison ? normalizedLive(current,p,c.width,c.height,flipped) : null,comparison?.adjustJoints || []);
             if (t - lastFeedback > 650) {
                 lastFeedback = t;
                 renderComparison(comparison);
-                setFeedback(assessment.state === 'unknown' ? assessment : comparison?.feedback || {state:'unknown',title:'Adjust your camera view',text:'Some joints overlap. Move the camera slightly so each limb is visible.'});
+                setFeedback(['unknown','warning'].includes(assessment.state) ? assessment : comparison?.feedback || {state:'unknown',title:'Adjust your camera view',text:'Some joints overlap. Move the camera slightly so each limb is visible.'});
             }
         } requestAnimationFrame(t => track(t, token));
-    } catch (e) { stopCamera(); setFeedback({ state: 'warning', title: 'Tracking paused', text: 'Pose tracking encountered a problem. Restart the camera to try again.' }); }
+    } catch (e) { console.error('Pose tracking frame failed', e); stopCamera(); guidance.show('error',current,'Tracking paused. Restart the camera to try again.'); setFeedback({ state: 'warning', title: 'Tracking paused', text: 'Pose tracking encountered a problem. Restart the camera to try again.' }); }
 }
 
 function clearComparison() {
+ holdConfirmation.reset(); holdState={phase:"adjusting",seconds:3}; renderHold();
  const canvas=$('overlay'); canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
  renderComparison(null); sceneApi?.setLive(null); lastFeedback=0;
 }
+function renderHold(){
+ const el=$('hold-progress');
+ el.hidden=holdState.phase==='adjusting';
+ $('stage').dataset.hold=holdState.phase;
+ const text=holdState.phase==='holding' ? `Hold steady · ${holdState.seconds}` : holdState.phase==='confirmed' ? '✓ Hold confirmed · keep breathing' : '✓ Hold complete · rest when ready';
+ if(el.textContent!==text)el.textContent=text;
+}
 function renderComparison(result) {
- $('stage').dataset.match=result?.quality?.band || 'neutral';
+ $('stage').dataset.match=result?.quality?.band==='green' && !['confirmed','complete'].includes(holdState.phase) ? 'orange' : result?.quality?.band || 'neutral';
  $('match-status').textContent=result?.quality?.label || 'Waiting for a clear pose';
  $('comparison-status').textContent=result ? 'Your angles / reference angles' : 'Full-body tracking needed to compare';
  $('comparison-metrics').replaceChildren();
@@ -63,9 +128,10 @@ function renderComparison(result) {
   el.append(label,value);$('comparison-metrics').append(el);
  }
 }
+$('expand-practice').onclick=()=>focusView.setExpanded(true);
 $('focus-camera').onclick=()=>$('camera-dialog').showModal();
 $('focus-stop').onclick=()=>stopCamera();
-setInterval(()=>{if(stream && performance.now()-lastPoseFrame>500){focusView.setExpanded(presence.update(false,performance.now()));sceneApi?.setLive(null);renderComparison(null);}},250);
+setInterval(()=>{if(stream && !starting && performance.now()-lastPoseFrame>1500){holdState=holdConfirmation.update(false,false,performance.now());renderHold();guidance.reset();guidance.show('stalled',current);sceneApi?.setLive(null);renderComparison(null);}},250);
 $('show-camera').onclick=()=>$('camera-dialog').showModal();
 $('close-camera').onclick=()=>$('camera-dialog').close();
 $('switch-side').onclick=()=>{flipped=!flipped;sceneApi?.setPose(current);clearComparison();};
@@ -80,6 +146,7 @@ function drawComparison(ctx, p, result, width, height) {
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) { stopTimer(); } }); window.addEventListener('pagehide', stopCamera);
 selectPose('reach');
+initLanguage();
 async function initThree() {
     try {
         const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js'); const host = $('three'); const scene = new THREE.Scene(); const camera = new THREE.PerspectiveCamera(34, 1, .1, 100); camera.position.set(0, 1.65, 6.8); camera.lookAt(0, 1.15, 0); const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.shadowMap.enabled = true; host.append(renderer.domElement); scene.add(new THREE.HemisphereLight(0xffffff, 0x6f7d59, 2.5)); const light = new THREE.DirectionalLight(0xffffff, 3); light.position.set(-3, 5, 4); scene.add(light); const group = new THREE.Group(); scene.add(group); const mat = new THREE.MeshStandardMaterial({ color: 0x6c8058, roughness: .65, metalness: .05 }); const jointmat = new THREE.MeshStandardMaterial({ color: 0xd8ecad, roughness: .55 }); const headmat = new THREE.MeshStandardMaterial({ color: 0x869974, roughness: .55 }); const floor = new THREE.Mesh(new THREE.CircleGeometry(1.4, 80), new THREE.MeshBasicMaterial({ color: 0xafbda1, transparent: true, opacity: .28 })); floor.rotation.x = -Math.PI / 2; floor.position.y = .02; scene.add(floor); const rings = new THREE.Mesh(new THREE.RingGeometry(1.18, 1.19, 100), new THREE.MeshBasicMaterial({ color: 0x96aa81, side: THREE.DoubleSide, transparent: true, opacity: .5 })); rings.rotation.x = -Math.PI / 2; rings.position.y = .03; scene.add(rings);
@@ -92,6 +159,7 @@ async function initThree() {
         document.querySelectorAll('[data-model-view]').forEach(b=>b.onclick=()=>chooseView(b.dataset.modelView));
         $('rotate').onclick=()=>{rotation+=Math.PI/4;document.querySelectorAll('[data-model-view]').forEach(b=>b.setAttribute('aria-pressed','false'));};
         chooseView(isSidePose(current)?'side':'front');
+        $('stage').classList.add('guide-ready');
         sceneApi = { setPose(id) { target = getReference(id, flipped);chooseView(savedViews.get(id)||(isSidePose(id)?'side':'front')); }, setLive(values,adjust=[]) {
             liveGroup.visible=!!values;mat.color.set(values?0xdde5d6:0x6c8058);jointmat.color.set(values?0xf0f4e9:0xd8ecad);headmat.color.set(values?0xe5ebdf:0x869974);if(!values)return;
             const pts=values.map(v=>v?new THREE.Vector3(...v):null);liveJoints.forEach((m,i)=>{m.visible=!!pts[i];if(pts[i])m.position.copy(pts[i]);});
@@ -104,7 +172,8 @@ async function initThree() {
             const minX=Math.min(...projected)-.18,maxX=Math.max(...projected)+.18;
             const full=$('stage').classList.contains('focus-active');
             const area=host.getBoundingClientRect();
-            const usableHeight=embeddedPreview ? .85 : Math.max(.3,1-(full?230:190)/Math.max(area.height,1));
+            const guiding=!!$('stage').dataset.guidance && $('stage').dataset.guidanceCollapsed!=='true';
+            const usableHeight=embeddedPreview ? .85 : Math.max(.3,1-(guiding?80:full?230:190)/Math.max(area.height,1));
             const usableWidth=full?.88:.85;
             const distance=Math.max((maxY-minY)/(2*Math.tan(34*Math.PI/360)*usableHeight),(maxX-minX)/(2*Math.tan(34*Math.PI/360)*camera.aspect*usableWidth))+.12;
             const centerY=(minY+maxY)/2;

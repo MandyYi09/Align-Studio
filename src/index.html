@@ -10,69 +10,70 @@
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2326312e'/%3E%3Cpath d='M8 24L16 7l8 17M12 18h8' fill='none' stroke='%23d7f38a' stroke-width='3'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="studio.css?v=12">
+    <link rel="stylesheet" href="camera-guidance.css?v=11">
     <link rel="stylesheet" href="embed.css">
 </head>
 
 <body>
     <main>
-        <div class="intro">
-            <div>
-                <div class="eyebrow">ALIGN STUDIO · A LITTLE MOVEMENT. A LITTLE MORE YOU.</div>
-                <h1>Make room to feel better.</h1>
-                <p>Slow down. Find your form. Move at your own pace.</p>
-            </div>
-            <div class="private"><span>◈</span>
-                <div>Just you and your practice<small>Your camera stays on your device.</small></div>
-            </div>
-        </div>
+        <nav class="language-switch" data-language-switch aria-label="Language / 语言">
+            <button type="button" data-language="en" lang="en" aria-pressed="true">English</button>
+            <button type="button" data-language="zh" lang="zh-CN" aria-pressed="false">中文</button>
+        </nav>
         <div class="workspace">
-            <aside class="library">
-                <div class="section-title">
-                    <h2>Your practice</h2><span>32 movements</span>
+            <section class="studio" aria-label="Movement studio">
+                <div class="practice-header">
+                    <div class="current-pose">
+                        <div class="eyebrow" id="pose-tag">STRETCH · UPPER BODY</div>
+                        <h2 id="pose-name"></h2>
+                    </div>
+                    <div class="practice-actions">
+                        <button id="select-pose" class="select-pose" aria-haspopup="dialog" aria-controls="pose-dialog">Change pose <span aria-hidden="true">↗</span></button>
+                        <button id="toggle-details" class="details-toggle" aria-controls="pose-details" aria-expanded="false">Pose details <span aria-hidden="true">+</span></button>
+                    </div>
                 </div>
-                <div class="filters" role="group" aria-label="Movement category"><button class="selected"
-                        data-filter="all">All</button><button data-filter="stretch">Stretches</button><button
-                        data-filter="yoga">Yoga</button></div>
-                <div id="poses"></div>
-                <div class="before"><span>☀</span>
-                    <h3>Ease into it.</h3>
-                    <p>Warm up with 5–10 minutes of light movement. A gentle pull is enough. Stop if you feel pain.</p>
-                    <a href="https://www.mayoclinic.org/healthy-lifestyle/fitness/in-depth/stretching/art-20546848"
-                        target="_blank" rel="noreferrer">A note on safe stretching ↗</a>
-                </div>
-            </aside>
-            <section class="studio">
                 <div class="stage" id="stage">
                     <div class="stage-top"><span class="pill" id="mode">○ &nbsp; REFERENCE PREVIEW</span><span
                             class="stage-type">3D MOVEMENT GUIDE</span></div>
-                    <div id="three"></div><div class="focus-toolbar"><button id="focus-camera" class="glass">Show camera</button><button id="focus-stop" class="glass">Stop camera</button><button id="exit-focus" class="glass" hidden>Back to studio · Esc</button></div><div id="focus-feedback" class="focus-feedback" aria-live="polite"></div><span class="reference-label">3D reference · 2D pose estimate</span><span id="match-status" class="match-status" aria-live="polite">Waiting for a clear pose</span><div class="stage-note" id="stage-note">A little space goes a long way.<small>Step back until your
-                            whole body is visible.</small></div>
-                    <div class="stage-bottom"><span id="angle-label">↔ &nbsp; Face your camera</span><button id="switch-side" class="glass" hidden>⇄ Switch side</button><span class="model-views" role="group" aria-label="3D model viewing angle"><button class="glass" data-model-view="front" aria-pressed="true">Front</button><button class="glass" data-model-view="side" aria-pressed="false">Side</button></span><button id="rotate"
+                    <div id="three"></div>
+                    <div id="camera-guidance" class="camera-guidance" hidden>
+                        <div class="guidance-visual" aria-hidden="true">
+                            <svg viewBox="0 0 180 210" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+                                <path class="frame-corners" d="M38 12H12v30m130-30h26v30M12 168v30h26m130-30v30h-26"/>
+                                <g class="body-front"><circle cx="90" cy="43" r="13"/><path d="M90 60v65m-32-48 32-10 32 10M58 77l-12 38m76-38 12 38m-44 10-22 50m22-50 22 50"/></g>
+                                <g class="body-side"><circle cx="93" cy="43" r="13"/><path d="m105 44 7 4-7 4M90 60v65m0-55 15 25-8 25m-7 5-6 50m6-50 14 50"/></g>
+                            </svg>
+                            <span id="guidance-icon">◎</span>
+                        </div>
+                        <div class="guidance-content"><div role="status" aria-live="polite" aria-atomic="true"><strong id="guidance-title">Step into the frame</strong><p id="guidance-copy"></p></div><p id="guidance-angle" class="guidance-angle"></p></div>
+                    </div>
+                    <div id="hold-progress" class="hold-progress" role="status" aria-live="polite" hidden></div>
+                    <button id="voice-guidance" class="glass voice-guidance" aria-pressed="false">♪ Voice off</button><div class="focus-toolbar"><button id="focus-camera" class="glass">Show camera</button><button id="focus-stop" class="glass">Stop camera</button><button id="exit-focus" class="glass" hidden>Back to studio · Esc</button></div><div id="focus-feedback" class="focus-feedback" aria-live="polite"></div><span class="reference-label">3D movement guide</span><span id="match-status" class="match-status" aria-live="polite">Waiting for a clear pose</span><div class="stage-note" id="stage-note">Keep your whole body in frame.</div>
+                    <div class="stage-bottom"><button id="toggle-guidance" class="glass" aria-controls="camera-guidance" aria-expanded="true" hidden>Hide cues</button><button id="expand-practice" class="glass" disabled>Expand practice</button><span id="angle-label">↔ &nbsp; Face your camera</span><button id="switch-side" class="glass" hidden>⇄ Switch side</button><span class="model-views" role="group" aria-label="3D model viewing angle"><button class="glass" data-model-view="front" aria-pressed="true">Front</button><button class="glass" data-model-view="side" aria-pressed="false">Side</button></span><button id="rotate"
                             class="glass">↻ Rotate guide</button></div>
                 </div>
-                <button id="show-camera" class="quiet camera-toggle" disabled>▣ Show camera</button><dialog id="camera-dialog"><div class="camera-dialog-header"><h2>Your camera</h2><button id="close-camera" class="quiet">Close ×</button></div><div class="camera-feed"><video id="video" autoplay playsinline muted hidden></video><canvas
+                <dialog id="camera-dialog"><div class="camera-dialog-header"><h2>Your camera</h2><button id="close-camera" class="quiet">Close ×</button></div><div class="camera-feed"><video id="video" autoplay playsinline muted hidden></video><canvas
                         id="overlay" hidden></canvas>
-                    </div><p>Solid lines: you. Dashed blue lines: reference.</p></dialog><p id="camera-setup" class="camera-setup">Camera setup: face the camera with your whole body visible.</p><div class="comparison-panel"><div class="comparison-legend"><span><i class="you-key"></i>Your pose</span><span><i class="reference-key"></i>Reference</span><span><i class="adjust-key"></i>Try adjusting</span></div><p id="comparison-status">Full-body tracking needed to compare</p><div id="comparison-metrics"></div><small>Dashed lines are scaled to your torso. Angles are approximate; a closer match is not a safety score.</small></div><div class="camera-bar">
-                    <div><strong id="camera-title">Your space. Your pace.</strong><span id="camera-sub">Enable your
-                            camera to get live alignment cues.</span></div><button class="primary" id="camera">▣ &nbsp;
-                        Enable camera</button>
+                    </div><p>Solid lines: you. Dashed blue lines: reference.</p></dialog><p id="camera-setup" class="camera-setup">Camera setup: face the camera with your whole body visible.</p><details class="comparison-panel" id="tracking-details" hidden><summary>Live alignment details</summary><div class="comparison-content"><div class="comparison-legend"><span><i class="you-key"></i>Your pose</span><span><i class="reference-key"></i>Reference</span><span><i class="adjust-key"></i>Try adjusting</span></div><p id="comparison-status">Full-body tracking needed to compare</p><div id="comparison-metrics"></div><small>Dashed lines are scaled to your torso. Angles are approximate; a closer match is not a safety score.</small></div></details><div class="camera-bar">
+                    <div><strong id="camera-title">Live alignment</strong><span id="camera-sub">Enable your
+                            camera to get live alignment cues.</span></div><div class="camera-actions"><button id="show-camera" class="quiet camera-toggle" disabled>Show camera</button><button class="primary" id="camera">Enable camera</button></div>
+                </div>
+                <div class="feedback" aria-live="polite"><span id="feedback-icon">◌</span>
+                    <div><strong id="feedback-title">Ready when you are</strong>
+                        <p id="feedback-text">Turn on your camera to see your alignment feedback here.</p>
+                    </div>
                 </div>
                 <div class="privacy-line">◈ &nbsp; Processed on your device. No video is recorded or uploaded.</div>
             </section>
-            <aside class="details">
-                <div class="eyebrow" id="pose-tag">STRETCH · UPPER BODY</div>
-                <h2 id="pose-name"></h2>
+            <aside class="details" id="pose-details" aria-label="Pose details" hidden>
+                <h2>Your practice</h2>
                 <p id="pose-description"></p>
                 <div class="facts"><span>◎ <b id="hold-duration">30 sec</b><small>Suggested hold</small></span><span>⌁
                         <b id="pose-level">Easy</b><small>Take it gently</small></span></div>
                 <div class="divider"></div>
                 <h3>Find your alignment</h3>
                 <div id="cues"></div>
-                <div class="feedback" aria-live="polite"><span id="feedback-icon">◌</span>
-                    <div><strong id="feedback-title">Ready when you are</strong>
-                        <p id="feedback-text">Turn on your camera to see your alignment feedback here.</p>
-                    </div>
-                </div>
                 <div class="timer">
                     <div><span>COMFORTABLE HOLD</span><b id="time">00:30</b></div><button id="timer"
                         aria-label="Start hold timer">▶</button>
@@ -80,12 +81,21 @@
                 <p class="timer-note">A manual timer. Release sooner if you need to.</p>
             </aside>
         </div>
-        <footer><span>MOVE WITH AWARENESS, NOT PERFECTION.</span>
-            <p>Alignment cues are estimates, not a safety assessment or medical advice. Never push through pain.</p>
-            <span>Made for a gentler everyday.</span>
-        </footer>
+        <dialog id="pose-dialog" class="pose-dialog" aria-labelledby="pose-dialog-title">
+            <div class="selector-header">
+                <div><h2 id="pose-dialog-title">Choose a movement</h2></div>
+                <button id="close-poses" class="icon-button" aria-label="Close pose selector">×</button>
+            </div>
+            <div class="selector-tools">
+                <label class="pose-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="pose-search" type="search" placeholder="Search movements…" aria-label="Search movements" autocomplete="off" autofocus></label>
+                <div class="filters" role="group" aria-label="Movement category"><button class="selected" data-filter="all" aria-pressed="true">All</button><button data-filter="stretch" aria-pressed="false">Stretches</button><button data-filter="yoga" aria-pressed="false">Yoga</button></div>
+            </div>
+            <div class="selector-count" id="pose-count" role="status"></div>
+            <div id="poses" class="pose-grid" role="group" aria-label="Movements"></div>
+            <div id="pose-empty" class="pose-empty" hidden><strong>No movements found</strong><p>Try another name or category.</p><button id="reset-poses" class="quiet">Clear filters</button></div>
+        </dialog>
     </main>
-    <script type="module" src="app.js?v=7"></script>
+    <script type="module" src="app.js?v=12"></script>
 </body>
 
 </html>
